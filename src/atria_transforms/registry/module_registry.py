@@ -12,5 +12,7 @@ def init_registry():
     _initialized = True
     ModuleRegistry().add_registry_group(
         name="DATA_TRANSFORM",
-        registry_group=DataTransformRegistryGroup(name="data_transform"),
+        registry_group=DataTransformRegistryGroup(
+            name="data_transform", default_provider="atria_transforms"
+        ),
     )
