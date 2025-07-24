@@ -1,16 +1,13 @@
 from typing import TYPE_CHECKING
 
 from atria_core.transforms import DataTransform
-from atria_core.utilities.auto_config import auto_config
 from atria_core.utilities.imports import _resolve_module_from_path
-
 from atria_transforms.registry import DATA_TRANSFORM
 
 if TYPE_CHECKING:
     import torch
 
 
-@auto_config()
 class TorchvisionTransform(DataTransform):
     """
     A wrapper class for applying a specified transformation to a PyTorch tensor.
