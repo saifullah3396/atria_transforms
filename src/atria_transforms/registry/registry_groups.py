@@ -25,5 +25,5 @@ class DataTransformRegistryGroup(RegistryGroup):
             module_paths=TorchvisionTransform,
             module_names="image/" + _convert_to_snake_case(transform),
             transform=transform,
-            **kwargs,
+            kwargs=kwargs,
         )

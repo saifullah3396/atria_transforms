@@ -1,46 +1,31 @@
-from collections.abc import Sequence
+from __future__ import annotations
 
-import numpy as np
-import torch
-import torchvision.transforms as T
-from atria_core.constants import _MAX_REPR_PRINT_ELEMENTS
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
+
 from atria_core.logger.logger import get_logger
 from atria_core.transforms import DataTransform
-from atria_core.types import BoundingBoxMode, DocumentInstance
+from atria_core.utilities.repr import RepresentationMixin
+from atria_registry import RegistryConfig
 from mmcv.transforms.base import BaseTransform
 from mmcv.transforms.utils import cache_randomness
 from mmdet.registry import TRANSFORMS
 from mmdet.structures import DetDataSample
-from pydantic import BaseModel, ConfigDict
-from rich.pretty import pretty_repr
+from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from atria_core.types import DocumentInstance
+
 
 from atria_transforms.registry import DATA_TRANSFORM
 
 logger = get_logger(__name__)
 
 
-class MMDetInput(BaseModel):
+class MMDetInput(BaseModel, RepresentationMixin):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
-    inputs: list[torch.Tensor] | torch.Tensor
+    inputs: list[Any] | Any
     data_samples: DetDataSample
-
-    def __repr__(self) -> str:
-        """
-        Returns a pretty-printed string representation of the model.
-
-        Returns:
-            str: The string representation of the model.
-        """
-        return pretty_repr(self, max_length=_MAX_REPR_PRINT_ELEMENTS)
-
-    def __str__(self) -> str:
-        """
-        Returns a string representation of the model.
-
-        Returns:
-            str: The string representation of the model.
-        """
-        return pretty_repr(self, max_length=_MAX_REPR_PRINT_ELEMENTS)
 
 
 @TRANSFORMS.register_module()
@@ -67,6 +52,8 @@ class RandomChoiceResize(BaseTransform):
             where ``scale`` is the selected image scale and
             ``scale_idx`` is the selected index in the given candidates.
         """
+
+        import numpy as np
 
         scale_idx = np.random.randint(len(self.scales))
         scale = self.scales[scale_idx]
@@ -97,22 +84,29 @@ class RandomChoiceResize(BaseTransform):
         return repr_str
 
 
-@DATA_TRANSFORM.register("document_instance_mmdet_transform")
+@DATA_TRANSFORM.register(
+    "document_instance_mmdet_transform",
+    configs=[
+        RegistryConfig(name="train", is_training=True),
+        RegistryConfig(name="evaluation", is_training=False),
+    ],
+)
 class DocumentInstanceMMDetTransform(DataTransform):
-    _REGISTRY_CONFIGS = {
-        "train": {"is_training": True},
-        "evaluation": {"is_training": False},
-    }
+    train_scale: list[tuple[int, int]] | tuple[int, int] = Field(
+        default=(512, 400), description="Scale for training images."
+    )
+    test_scale: list[tuple[int, int]] | tuple[int, int] = Field(
+        default=(512, 400), description="Scale for testing images."
+    )
+    is_training: bool = Field(
+        default=False, description="Whether the transform is used for training."
+    )
+    use_test_time_augmentation: bool = Field(
+        default=False, description="Whether to use test time augmentation."
+    )
 
-    def __init__(
-        self,
-        train_scale: list[tuple[int, int]] | tuple[int, int] = (512, 400),
-        test_scale: list[tuple[int, int]] | tuple[int, int] = (512, 400),
-        is_training: bool = False,
-        use_test_time_augmentation: bool = False,
-    ):
-        super().__init__(None)
-
+    def model_post_init(self, context: Any) -> None:
+        import torchvision.transforms as T
         from mmdet.datasets.transforms import (
             LoadAnnotations,
             PackDetInputs,
@@ -120,13 +114,11 @@ class DocumentInstanceMMDetTransform(DataTransform):
             Resize,
         )
 
-        self._is_training = is_training
-        self._use_test_time_augmentation = use_test_time_augmentation
-        if is_training:
+        if self.is_training:
             from mmcv.transforms import RandomChoiceResize, TestTimeAug
 
-            if isinstance(train_scale, tuple):
-                train_scale = [train_scale]
+            if isinstance(self.train_scale, tuple):
+                train_scale = [self.train_scale]
             self._transform = T.Compose(
                 [
                     LoadAnnotations(with_bbox=True, with_mask=True),
@@ -148,11 +140,12 @@ class DocumentInstanceMMDetTransform(DataTransform):
                 ]
             )
         else:
+            import torchvision.transforms as T
             from mmcv.transforms import RandomChoiceResize, TestTimeAug
 
-            if self._use_test_time_augmentation:
-                if isinstance(test_scale, tuple):
-                    test_scale = [test_scale]
+            if self.use_test_time_augmentation:
+                if isinstance(self.test_scale, tuple):
+                    test_scale = [self.test_scale]
                 self._transform = T.Compose(
                     [
                         LoadAnnotations(with_bbox=True, with_mask=True, box_type=None),
@@ -184,6 +177,9 @@ class DocumentInstanceMMDetTransform(DataTransform):
                     ]
                 )
             else:
+                import torchvision.transforms as T
+                from mmcv.transforms import RandomChoiceResize, TestTimeAug
+
                 if isinstance(test_scale, list):
                     test_scale = test_scale[0]
                 self._transform = T.Compose(
@@ -207,6 +203,8 @@ class DocumentInstanceMMDetTransform(DataTransform):
                 )
 
     def _prepare_instances(self, document_instance: DocumentInstance):
+        from atria_core.types import BoundingBoxMode
+
         assert document_instance.gt.layout.annotated_objects is not None, (
             f"Document instance must have annotated objects in the ground truth for {self.__class__} ."
         )
@@ -253,8 +251,8 @@ class DocumentInstanceMMDetTransform(DataTransform):
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}(\n"
-            f"  is_training={self._is_training},\n"
-            f"  use_test_time_augmentation={self._use_test_time_augmentation},\n"
+            f"  is_training={self.is_training},\n"
+            f"  use_test_time_augmentation={self.use_test_time_augmentation},\n"
             f"  target_key={self.key},\n"
             f"  transform={self._transform},\n"
             f")"

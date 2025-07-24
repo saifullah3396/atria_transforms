@@ -28,11 +28,12 @@ Version: 1.0.0
 License: MIT
 """
 
-from collections.abc import Callable
+from typing import Any
 
 from atria_core.logger import get_logger
 from atria_core.transforms import Compose, DataTransform
 from atria_core.types import Image
+from atria_registry.registry_config import RegistryConfig
 
 from atria_transforms.registry import DATA_TRANSFORM
 
@@ -41,37 +42,19 @@ logger = get_logger(__name__)
 
 @DATA_TRANSFORM.register("tf_composer")
 class TransformsComposer(DataTransform):
-    def __init__(
-        self,
-        transforms: list[Callable] | list[dict] | Callable,
-        apply_path: str | None = None,
-    ):
-        super().__init__(apply_path=apply_path)
-        self.transforms = transforms
-        self._validate_transforms()
+    configs: list[RegistryConfig]
+    _transforms: Compose | None = None
 
-    def _validate_transforms(self):
-        if isinstance(self.transforms, list) and all(
-            callable(x) for x in self.transforms
-        ):
-            self.transforms = Compose(self.transforms)
-        elif isinstance(self.transforms, list) and all(
-            isinstance(x, dict) and "name" in x and "kwargs" in x
-            for x in self.transforms
-        ):
-            self.transforms = Compose(
-                [
-                    DATA_TRANSFORM.load_from_registry(x["name"], **x.get("kwargs", {}))
-                    for x in self.transforms
-                ]
-            )
-        elif callable(self.transforms):
-            self.transforms = Compose([self.transforms])
-        else:
-            raise ValueError(
-                "Transforms must be a list of callables or a single callable. Got: "
-                f"{self.transforms}"
-            )
+    def model_post_init(self, context: Any) -> None:
+        self._initialize_transforms()
+
+    def _initialize_transforms(self):
+        self._transforms = Compose(
+            [
+                DATA_TRANSFORM.load_from_registry(config.name, **config.model_extra)
+                for config in self.configs
+            ]
+        )
 
     def _apply_transforms(self, input: "Image") -> "Image":
         """
@@ -83,32 +66,26 @@ class TransformsComposer(DataTransform):
         Returns:
             Image: The transformed `Image` object.
         """
-        input.content = self.transforms(input.content)
+        input.content = self._transforms(input.content)
         return input
 
 
-@DATA_TRANSFORM.register("image")
+@DATA_TRANSFORM.register(
+    "image",
+    configs=[
+        RegistryConfig(
+            name="default",
+            configs=[
+                RegistryConfig(name="image/resize", apply_path="content"),
+                RegistryConfig(name="image/to_tensor", apply_path="content"),
+                RegistryConfig(name="image/tensor_gray_to_rgb", apply_path="content"),
+                RegistryConfig(name="image/normalize", apply_path="content"),
+            ],
+        )
+    ],
+)
 class ImageTransformsComposer(TransformsComposer):
-    _REGISTRY_CONFIGS = {
-        "default": {
-            "transforms": [
-                {"name": "image/resize", "kwargs": {"apply_path": "content"}},
-                {"name": "image/to_tensor", "kwargs": {"apply_path": "content"}},
-                {
-                    "name": "image/tensor_gray_to_rgb",
-                    "kwargs": {"apply_path": "content"},
-                },
-                {"name": "image/normalize", "kwargs": {"apply_path": "content"}},
-            ]
-        }
-    }
-
-    def __init__(
-        self,
-        transforms: list[Callable] | list[dict] | Callable,
-        apply_path: str | None = "image",
-    ):
-        super().__init__(transforms=transforms, apply_path=apply_path)
+    apply_path: str | None = "image"
 
     def _apply_transforms(self, input: "Image") -> "Image":
         """
@@ -120,4 +97,4 @@ class ImageTransformsComposer(TransformsComposer):
         Returns:
             Image: The transformed `Image` object.
         """
-        return self.transforms(input)
+        return self.config(input)

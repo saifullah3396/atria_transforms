@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 
 import lazy_loader as lazy
 
+from .registry import DATA_TRANSFORM
+
 if TYPE_CHECKING:
     from .core.image import (
         Cifar10ImageTransform,
@@ -18,7 +20,6 @@ if TYPE_CHECKING:
     from .core.sequence import DocumentInstanceTokenizer, TokenizerObjectSanitizer
     from .core.torchvision import TorchvisionTransform
     from .data_types import TokenizedDocumentInstance, TokenizedQuestionAnswerPair
-    from .registry import DATA_TRANSFORM
 
 __getattr__, __dir__, __all__ = lazy.attach(
     __name__,
@@ -33,14 +34,8 @@ __getattr__, __dir__, __all__ = lazy.attach(
             "MMDetInput",
             "RandomChoiceResize",
         ],
-        "core.sequence": [
-            "DocumentInstanceTokenizer",
-            "TokenizerObjectSanitizer",
-        ],
+        "core.sequence": ["DocumentInstanceTokenizer", "TokenizerObjectSanitizer"],
         "core.torchvision": ["TorchvisionTransform"],
-        "data_types": [
-            "TokenizedDocumentInstance",
-            "TokenizedQuestionAnswerPair",
-        ],
+        "data_types": ["TokenizedDocumentInstance", "TokenizedQuestionAnswerPair"],
     },
 )

@@ -1,16 +1,11 @@
 _target_: atria_transforms.core.tf_composer.ImageTransformsComposer
-_partial_: false
-transforms:
-- name: image/resize
-  kwargs:
-    apply_path: content
-- name: image/to_tensor
-  kwargs:
-    apply_path: content
-- name: image/tensor_gray_to_rgb
-  kwargs:
-    apply_path: content
-- name: image/normalize
-  kwargs:
-    apply_path: content
 apply_path: image
+configs:
+- _target_: atria_registry.registry_config.RegistryConfig
+  name: image/resize
+- _target_: atria_registry.registry_config.RegistryConfig
+  name: image/to_tensor
+- _target_: atria_registry.registry_config.RegistryConfig
+  name: image/tensor_gray_to_rgb
+- _target_: atria_registry.registry_config.RegistryConfig
+  name: image/normalize

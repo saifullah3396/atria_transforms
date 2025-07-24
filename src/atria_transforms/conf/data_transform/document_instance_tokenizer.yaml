@@ -1,11 +1,9 @@
 _target_: atria_transforms.core.sequence.DocumentInstanceTokenizer
 tokenizer_name: ???
+task_type: ???
 apply_path: null
-task_type: visual_question_answering
 init_kwargs: {}
-call_kwargs:
-  stride: 128
-  truncation: only_second
+call_kwargs: {}
 overflow_sampling: return_all
 max_overflow_samples: 10
 use_ssl: false

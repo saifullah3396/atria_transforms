@@ -28,19 +28,18 @@ Version: 1.0.0
 License: MIT
 """
 
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-import numpy as np
+from typing import TYPE_CHECKING, Any
+
 from atria_core.logger import get_logger
 from atria_core.transforms import DataTransform
-from atria_core.types import Image
 
 from atria_transforms.registry import DATA_TRANSFORM
 
 if TYPE_CHECKING:
     import torch
-
+    from atria_core.types import Image
 
 logger = get_logger(__name__)
 
@@ -59,34 +58,19 @@ class Cifar10ImageTransform(DataTransform):
         transforms (Callable): The transformation pipeline to apply.
     """
 
-    def __init__(
-        self,
-        apply_path: str | None = None,
-        mean: float | list[float] | None = None,
-        std: float | list[float] | None = None,
-        pad_size: int = 4,
-        crop_size: int = 32,
-        train: bool = False,
-    ):
-        """
-        Initializes the `Cifar10ImageTransform` class.
+    apply_path: str | None = "image"
+    mean: float | list[float] | None = None
+    std: float | list[float] | None = None
+    pad_size: int = 4
+    crop_size: int = 32
+    train: bool = False
 
-        Args:
-            apply_path (Optional[str]): The path to the input attribute in the data model.
-            mean (Union[float, List[float]]): The mean values for normalization. Defaults to CIFAR-10 values.
-            std (Union[float, List[float]]): The standard deviation values for normalization. Defaults to CIFAR-10 values.
-            pad_size (int): The padding size for the image. Defaults to 4.
-            crop_size (int): The crop size for the image. Defaults to 32.
-            train (bool): Whether the transformation is for training or evaluation. Defaults to False.
-        """
+    def model_post_init(self, context: Any) -> None:
+        import numpy as np
         from torchvision import transforms as T
 
-        super().__init__(apply_path=apply_path)
-        self.mean = [0.4914, 0.4822, 0.4465] if mean is None else mean
-        self.std = [0.247, 0.243, 0.261] if std is None else std
-        self.pad_size = pad_size
-        self.crop_size = crop_size
-        self.train = train
+        self.mean = [0.4914, 0.4822, 0.4465] if self.mean is None else self.mean
+        self.std = [0.247, 0.243, 0.261] if self.std is None else self.std
 
         if self.train:
             self.transforms = T.Compose(
@@ -102,7 +86,7 @@ class Cifar10ImageTransform(DataTransform):
                 [T.Normalize(np.array(self.mean), np.array(self.std))]
             )
 
-    def _apply_transforms(self, image: "torch.Tensor") -> "torch.Tensor":
+    def _apply_transforms(self, image: torch.Tensor) -> torch.Tensor:
         """
         Applies the CIFAR-10 preprocessing pipeline to the input tensor.
 
@@ -121,7 +105,7 @@ class TensorGrayToRgb(DataTransform):
     A transformation that converts grayscale tensors to RGB format.
     """
 
-    def _apply_transforms(self, image: "torch.Tensor") -> "torch.Tensor":
+    def _apply_transforms(self, image: torch.Tensor) -> torch.Tensor:
         """
         Converts a grayscale tensor to RGB format by repeating the single channel.
 
@@ -150,25 +134,10 @@ class FixedAspectRatioResize(DataTransform):
         transforms (Optional[Callable]): Additional transformations to apply after resizing.
     """
 
-    def __init__(
-        self,
-        apply_path: str | None = "image",
-        max_size: int = 512,
-        transforms: Callable | None = None,
-    ):
-        """
-        Initializes the `FixedAspectRatioResize` class.
+    apply_path: str | None = "image"
+    max_size: int = 512
 
-        Args:
-            apply_path (Optional[str]): The path to the input attribute in the data model.
-            max_size (int): The maximum size for the longer dimension of the image.
-            transforms (Optional[Callable]): Additional transformations to apply after resizing. Defaults to None.
-        """
-        super().__init__(apply_path=apply_path)
-        self.max_size = max_size
-        self.transforms = transforms
-
-    def _apply_transforms(self, image: "Image") -> "Image":
+    def _apply_transforms(self, image: Image) -> Image:
         """
         Resizes the image while maintaining its aspect ratio.
 

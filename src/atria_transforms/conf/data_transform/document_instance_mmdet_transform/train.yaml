@@ -1,5 +1,5 @@
 _target_: atria_transforms.core.mmdet.DocumentInstanceMMDetTransform
-_partial_: false
+apply_path: null
 train_scale:
 - 512
 - 400
