@@ -10,6 +10,9 @@ from atria_transforms.core.torchvision import *  # noqa
 from atria_transforms.registry import DATA_TRANSFORM
 
 if __name__ == "__main__":
-    write_registry_to_yaml(
-        str(Path(__file__).parent / "conf"), types=[DATA_TRANSFORM.name]
-    )
+    # remove the folder if it exists
+    config_path = Path(__file__).parent / "conf"
+    if config_path.exists():
+        config_path.rmdir()
+
+    write_registry_to_yaml(str(config_path), types=[DATA_TRANSFORM.name])
