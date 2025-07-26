@@ -14,8 +14,11 @@ if TYPE_CHECKING:
     from typing import Any
 
     import torch
-    from atria_core.types import DocumentInstance, QuestionAnswerPair, TaskType
-    from atria_transforms.data_types import TokenizedDocumentInstance
+    from atria_core.types import DocumentInstance, TaskType
+    from atria_transforms.data_types import (
+        TokenizedDocumentInstance,
+        TokenizedQuestionAnswerPair,
+    )
 
 logger = get_logger(__name__)
 
@@ -308,13 +311,12 @@ class DocumentInstanceTokenizer(DataTransform):
 
     def _generate_qa_token_ids(
         self,
-        qa_pair: QuestionAnswerPair,
+        qa_pair: TokenizedQuestionAnswerPair,
         word_ids: torch.Tensor,
         sequence_ids: torch.Tensor,
         sequence_length: int = 512,
     ) -> Mapping[str, Any] | list[Mapping[str, Any]]:
         import torch
-        from atria_transforms.data_types import TokenizedQuestionAnswerPair
 
         tokenized_answer_starts, tokenized_answer_ends = [], []
         for word_ids_per_overflow, sequence_ids_per_overflow in zip(
@@ -344,22 +346,22 @@ class DocumentInstanceTokenizer(DataTransform):
                 )
             tokenized_answer_starts.append(tokenized_answer_start)
             tokenized_answer_ends.append(tokenized_answer_end)
-        return TokenizedQuestionAnswerPair(
-            **qa_pair.__dict__,
-            tokenized_answer_starts=torch.tensor(
-                tokenized_answer_starts, dtype=torch.long, device=word_ids.device
-            ),
-            tokenized_answer_ends=torch.tensor(
-                tokenized_answer_ends, dtype=torch.long, device=word_ids.device
-            ),
+        tokenized_answer_start = torch.tensor(
+            tokenized_answer_starts, dtype=torch.long, device=word_ids.device
         )
+        tokenized_answer_end = torch.tensor(
+            tokenized_answer_ends, dtype=torch.long, device=word_ids.device
+        )
+        return tokenized_answer_start, tokenized_answer_end
 
     def _apply_transforms(
         self, document_instance: DocumentInstance
     ) -> Mapping[str, Any] | list[Mapping[str, Any]]:
         import torch
         from atria_core.types import TaskType
-        from atria_transforms.data_types import TokenizedDocumentInstance
+        from atria_transforms.data_types import (
+            TokenizedDocumentInstance,
+        )
 
         assert not document_instance._is_batched, (
             f"Document instance {document_instance.id} is batched. "
@@ -408,7 +410,18 @@ class DocumentInstanceTokenizer(DataTransform):
         if self.task_type == TaskType.visual_question_answering:
             words = document_instance.gt.vqa.words
             qa_pair = document_instance.gt.vqa.qa_pair
-            additional_kwargs = {"words": words, "qa_pair": qa_pair}
+            tokenized_answer_start, tokenized_answer_end = self._generate_qa_token_ids(
+                qa_pair=qa_pair,
+                word_ids=tokenized_samples_batch["word_ids"],
+                sequence_ids=tokenized_samples_batch["sequence_ids"],
+                sequence_length=tokenized_samples_batch["token_ids"].shape[-1],
+            )
+            additional_kwargs = {
+                "words": words,
+                "qa_pair": qa_pair,
+                "tokenized_answer_start": tokenized_answer_start,
+                "tokenized_answer_end": tokenized_answer_end,
+            }
 
         document_instance = TokenizedDocumentInstance(
             # copy the document instance attributes
@@ -423,14 +436,6 @@ class DocumentInstanceTokenizer(DataTransform):
             **additional_kwargs,
         )
         document_instance._tokenizer = self._processor.tokenizer
-
-        if document_instance.qa_pair is not None:
-            document_instance.qa_pair = self._generate_qa_token_ids(
-                document_instance.qa_pair,
-                document_instance.word_ids,
-                document_instance.sequence_ids,
-                sequence_length=document_instance.token_ids.shape[-1],
-            )
 
         return document_instance
 

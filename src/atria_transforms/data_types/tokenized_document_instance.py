@@ -25,17 +25,11 @@ License: MIT
 
 from __future__ import annotations
 
-from types import NoneType
 from typing import ClassVar, Self
 
 import torch
-from atria_core.types import BaseDataInstance, Image, Label
-from atria_core.utilities.common import _rgetattr
+from atria_core.types import BaseDataInstance, Image, Label, QuestionAnswerPair
 from pydantic import ConfigDict, PrivateAttr, model_validator
-
-from atria_transforms.data_types.tokenized_question_answer_pair import (
-    TokenizedQuestionAnswerPair,
-)
 
 
 class TokenizedDocumentInstance(BaseDataInstance):
@@ -59,7 +53,11 @@ class TokenizedDocumentInstance(BaseDataInstance):
     """
 
     model_config = ConfigDict(validate_assignment=False)
-    _batch_skip_fields: ClassVar[list[str]] = ["ocr", "page_id", "total_num_pages"]
+    _batch_skip_fields: ClassVar[list[str]] = [
+        "ocr",
+        "page_id",
+        "total_num_pages",
+    ]
     _batch_tensor_stack_skip_fields: ClassVar[list[str]] = [
         "token_ids",
         "token_bboxes",
@@ -68,6 +66,8 @@ class TokenizedDocumentInstance(BaseDataInstance):
         "word_ids",
         "sequence_ids",
         "overflow_to_sample_mapping",
+        "tokenized_answer_start",
+        "tokenized_answer_end",
     ]
     _tokenizer = PrivateAttr(default=None)
 
@@ -82,7 +82,9 @@ class TokenizedDocumentInstance(BaseDataInstance):
     image: Image | None = None
     label: Label | None = None
     words: list[str] | None = None
-    qa_pair: TokenizedQuestionAnswerPair | None = None
+    qa_pair: QuestionAnswerPair | None = None
+    tokenized_answer_start: torch.Tensor | None = None
+    tokenized_answer_end: torch.Tensor | None = None
 
     @property
     def prediction_indices_mask(self) -> torch.Tensor:
@@ -227,9 +229,14 @@ class TokenizedDocumentInstance(BaseDataInstance):
         self.overflow_to_sample_mapping = _cat_tensor_fields(
             self.overflow_to_sample_mapping
         )
-        if self.qa_pair is not None:
-            self.qa_pair.answer_starts = _cat_tensor_fields(self.qa_pair.answer_starts)
-            self.qa_pair.answer_ends = _cat_tensor_fields(self.qa_pair.answer_ends)
+        if (
+            self.tokenized_answer_start is not None
+            and self.tokenized_answer_end is not None
+        ):
+            self.tokenized_answer_start = _cat_tensor_fields(
+                self.tokenized_answer_start
+            )
+            self.tokenized_answer_end = _cat_tensor_fields(self.tokenized_answer_end)
 
         # we recursively repeat all the remaining fields that are not in 'non_repeated_keys'
         # we recursively repeat all the batched samples with given indices
@@ -243,8 +250,8 @@ class TokenizedDocumentInstance(BaseDataInstance):
                 "word_ids",
                 "sequence_ids",
                 "overflow_to_sample_mapping",
-                "answer_starts",
-                "answer_ends",
+                "tokenized_answer_start",
+                "tokenized_answer_end",
             ],
         )
         return (
@@ -258,8 +265,8 @@ class TokenizedDocumentInstance(BaseDataInstance):
                 "word_ids",
                 "sequence_ids",
                 "overflow_to_sample_mapping",
-                "answer_starts",
-                "answer_ends",
+                "tokenized_answer_start",
+                "tokenized_answer_end",
             ],
         )
 
@@ -277,7 +284,7 @@ class TokenizedDocumentInstance(BaseDataInstance):
             for sample in self.token_ids
         ]
 
-        def stack_fn(list_of_samples):
+        def _stack_fn(list_of_samples):
             return torch.stack(
                 [
                     sample[idx]
@@ -287,11 +294,19 @@ class TokenizedDocumentInstance(BaseDataInstance):
                 ]
             )
 
-        for key in NON_REPEATED_KEYS:
-            assert isinstance(_rgetattr(self, key), list | NoneType), (
-                f"{key} must be a list."
-            )
-            _apply(self, key, stack_fn)
+        self.token_ids = _stack_fn(self.token_ids)
+        self.token_bboxes = _stack_fn(self.token_bboxes)
+        self.token_labels = _stack_fn(self.token_labels)
+        self.attention_mask = _stack_fn(self.attention_mask)
+        self.word_ids = _stack_fn(self.word_ids)
+        self.sequence_ids = _stack_fn(self.sequence_ids)
+        self.overflow_to_sample_mapping = _stack_fn(self.overflow_to_sample_mapping)
+        if (
+            self.tokenized_answer_start is not None
+            and self.tokenized_answer_end is not None
+        ):
+            self.tokenized_answer_start = _stack_fn(self.tokenized_answer_start)
+            self.tokenized_answer_end = _stack_fn(self.tokenized_answer_end)
 
     def select_first_overflow_samples(self):
         """
@@ -319,11 +334,11 @@ class TokenizedDocumentInstance(BaseDataInstance):
             self.overflow_to_sample_mapping
         )
         if self.qa_pair is not None:
-            self.qa_pair.answer_starts = _gather_first_from_sequence_list(
-                self.qa_pair.answer_starts
+            self.qa_pair.answer_start = _gather_first_from_sequence_list(
+                self.qa_pair.answer_start
             )
-            self.qa_pair.answer_ends = _gather_first_from_sequence_list(
-                self.qa_pair.answer_ends
+            self.qa_pair.answer_end = _gather_first_from_sequence_list(
+                self.qa_pair.answer_end
             )
 
         self._assert_all_batch_size_equal()
