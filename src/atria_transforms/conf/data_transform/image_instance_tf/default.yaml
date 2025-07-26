@@ -1,0 +1,7 @@
+_target_: atria_transforms.core.image.ImageInstanceTransform
+_partial_: false
+defaults:
+- /data_transform@transforms.resize: image/resize
+- /data_transform@transforms.to_tensor: image/to_tensor
+- /data_transform@transforms.tensor_gray_to_rgb: image/tensor_gray_to_rgb
+- /data_transform@transforms.normalize: image/normalize

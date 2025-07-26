@@ -18,6 +18,7 @@ dependencies = [
     "mmdet==3.3.0",
     "transformers>=4.37.0",
     "atria-registry",
+    "typeguard>=4.4.4",
 ]
 
 

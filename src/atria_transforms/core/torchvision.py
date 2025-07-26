@@ -1,7 +1,8 @@
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from atria_core.transforms.base import DataTransform
-from atria_core.utilities.imports import _resolve_module_from_path
+from atria_registry.registry_config import RegistryConfig
 from pydantic import ConfigDict
 
 from atria_transforms.registry import DATA_TRANSFORM
@@ -10,38 +11,31 @@ if TYPE_CHECKING:
     import torch
 
 
+@DATA_TRANSFORM.register(
+    "image",
+    configs=[
+        RegistryConfig(name="resize", tf="Resize", interpolation=2, size=(224, 224)),
+        RegistryConfig(name="to_tensor", tf="ToTensor"),
+        RegistryConfig(name="center_crop", tf="CenterCrop"),
+        RegistryConfig(
+            name="normalize",
+            tf="Normalize",
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225],
+        ),
+        RegistryConfig(name="random_horizontal_flip", tf="RandomHorizontalFlip"),
+    ],
+)
 class TorchvisionTransform(DataTransform):  # or inherit from DataTransform if needed
-    """
-    A wrapper class for applying a specified transformation to a PyTorch tensor.
-    """
+    model_config = ConfigDict(extra="allow")
+    tf: Callable | str
 
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True, validate_assignment=False, extra="allow"
-    )
+    def _lazy_post_init(self) -> None:
+        from atria_core.utilities.imports import _resolve_module_from_path
 
-    transform: str  # Name of the torchvision transform class, like "Resize", "ToTensor"
-    kwargs: dict[str, Any] = {}
-
-    def model_post_init(self, context: Any) -> None:
-        self._transform = _resolve_module_from_path(
-            f"torchvision.transforms.{self.transform}"
-        )(**self.kwargs)
-
-    @property
-    def name(self) -> str:
-        return self.transform
+        self.tf = _resolve_module_from_path(f"torchvision.transforms.{self.tf}")(
+            **self.model_extra
+        )
 
     def _apply_transforms(self, image: "torch.Tensor") -> "torch.Tensor":
-        return self._transform(image)
-
-
-# Registering torchvision transformations into the DATA_TRANSFORM registry
-DATA_TRANSFORM.register_torchvision_transform(
-    "Resize", interpolation=2, size=(224, 224)
-)
-DATA_TRANSFORM.register_torchvision_transform("ToTensor")
-DATA_TRANSFORM.register_torchvision_transform("CenterCrop")
-DATA_TRANSFORM.register_torchvision_transform(
-    "Normalize", mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-)
-DATA_TRANSFORM.register_torchvision_transform("RandomHorizontalFlip")
+        return self.tf(image)

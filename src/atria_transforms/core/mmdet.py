@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from atria_core.logger.logger import get_logger
 from atria_core.transforms import DataTransform
 from atria_core.utilities.repr import RepresentationMixin
-from atria_registry import RegistryConfig
+from atria_registry.registry_config import RegistryConfig
 from mmcv.transforms.base import BaseTransform
 from mmcv.transforms.utils import cache_randomness
 from mmdet.registry import TRANSFORMS
@@ -105,7 +105,7 @@ class DocumentInstanceMMDetTransform(DataTransform):
         default=False, description="Whether to use test time augmentation."
     )
 
-    def model_post_init(self, context: Any) -> None:
+    def _lazy_post_init(self) -> None:
         import torchvision.transforms as T
         from mmdet.datasets.transforms import (
             LoadAnnotations,

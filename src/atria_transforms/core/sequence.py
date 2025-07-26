@@ -114,11 +114,13 @@ class DocumentInstanceTokenizer(DataTransform):
     image_mean: list[float] | None = None
     image_std: list[float] | None = None
 
-    def model_post_init(self, context: Any) -> None:
+    def _lazy_post_init(self) -> None:
+        # lazy initialization of the processor to avoid significant transformers loading times
         import inspect
         import os
 
         from atria_core.constants import _DEFAULT_ATRIA_MODELS_CACHE_DIR
+        from transformers import AutoProcessor
         from transformers.utils.constants import (
             IMAGENET_DEFAULT_MEAN,
             IMAGENET_DEFAULT_STD,
@@ -170,9 +172,6 @@ class DocumentInstanceTokenizer(DataTransform):
         }
         self.init_kwargs = {**default_init_kwargs, **self.init_kwargs}
         self.call_kwargs = {**default_call_kwargs, **self.call_kwargs}
-
-        # lazy initialization of the processor to avoid significant transformers loading times
-        from transformers import AutoProcessor
 
         self._processor = AutoProcessor.from_pretrained(
             self.tokenizer_name, **self.init_kwargs
@@ -455,5 +454,4 @@ class DocumentInstanceTokenizer(DataTransform):
             f"task_type={self.task_type}, init_kwargs={self.init_kwargs}, "
             f"call_kwargs={self.call_kwargs}, overflow_sampling={self.overflow_sampling}, "
             f"max_overflow_samples={self.max_overflow_samples}, "
-            f"processor_input_key_map={self.processor_input_key_map})"
         )

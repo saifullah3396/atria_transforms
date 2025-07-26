@@ -1,6 +1,6 @@
 _target_: atria_transforms.core.sequence.DocumentInstanceTokenizer
+_partial_: false
 tokenizer_name: ???
-apply_path: null
 task_type: sequence_classification
 init_kwargs: {}
 call_kwargs: {}
