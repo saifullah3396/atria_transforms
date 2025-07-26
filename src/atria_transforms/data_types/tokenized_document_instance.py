@@ -23,38 +23,19 @@ Version: 1.0.0
 License: MIT
 """
 
-from collections.abc import Callable
+from __future__ import annotations
+
 from types import NoneType
 from typing import ClassVar, Self
 
 import torch
-from atria_core.types import BaseDataInstance, Image, Label, QuestionAnswerPair
-from atria_core.utilities.common import _rgetattr, _rsetattr
-from pydantic import PrivateAttr, model_validator
+from atria_core.types import BaseDataInstance, Image, Label
+from atria_core.utilities.common import _rgetattr
+from pydantic import ConfigDict, PrivateAttr, model_validator
 
 from atria_transforms.data_types.tokenized_question_answer_pair import (
     TokenizedQuestionAnswerPair,
 )
-
-NON_REPEATED_KEYS = [
-    "token_ids",
-    "token_bboxes",
-    "token_labels",
-    "prediction_indices_mask",
-    "attention_mask",
-    "word_ids",
-    "sequence_ids",
-    "overflow_to_sample_mapping",
-    "qa_pair.tokenized_answer_starts",
-    "qa_pair.tokenized_answer_ends",
-]
-
-
-def _apply(obj: object, key: str, fn: Callable):
-    value = _rgetattr(obj, key)
-    if value is None:
-        return
-    _rsetattr(obj, key, fn(value))
 
 
 class TokenizedDocumentInstance(BaseDataInstance):
@@ -77,12 +58,12 @@ class TokenizedDocumentInstance(BaseDataInstance):
             tokens to sample indices.
     """
 
+    model_config = ConfigDict(validate_assignment=False)
     _batch_skip_fields: ClassVar[list[str]] = ["ocr", "page_id", "total_num_pages"]
     _batch_tensor_stack_skip_fields: ClassVar[list[str]] = [
         "token_ids",
         "token_bboxes",
         "token_labels",
-        "prediction_indices_mask",
         "attention_mask",
         "word_ids",
         "sequence_ids",
@@ -98,11 +79,32 @@ class TokenizedDocumentInstance(BaseDataInstance):
     word_ids: torch.Tensor
     sequence_ids: torch.Tensor
     overflow_to_sample_mapping: torch.Tensor
-    prediction_indices_mask: torch.Tensor
     image: Image | None = None
     label: Label | None = None
     words: list[str] | None = None
-    qa_pair: QuestionAnswerPair | TokenizedQuestionAnswerPair | None = None
+    qa_pair: TokenizedQuestionAnswerPair | None = None
+
+    @property
+    def prediction_indices_mask(self) -> torch.Tensor:
+        prediction_indices_mask = torch.zeros_like(
+            self.token_ids, dtype=torch.bool, device=self.token_ids.device
+        )
+        for idx, word_ids_per_sample in enumerate(self.word_ids):
+            if self.token_labels is not None:
+                prediction_indices = [
+                    i
+                    for i in range(len(word_ids_per_sample))
+                    if word_ids_per_sample[i] != word_ids_per_sample[i - 1]
+                    and self.token_labels[idx][i] != -100
+                ]
+            else:
+                prediction_indices = [
+                    i
+                    for i in range(len(word_ids_per_sample))
+                    if word_ids_per_sample[i] != word_ids_per_sample[i - 1]
+                ]
+            prediction_indices_mask[idx][prediction_indices] = True
+        return prediction_indices_mask
 
     def load(self) -> Self:
         raise NotImplementedError(
@@ -152,9 +154,6 @@ class TokenizedDocumentInstance(BaseDataInstance):
         Raises:
             AssertionError: If the tensor shapes are inconsistent.
         """
-        # this type is by default initialized as a tensor and has no raw representation
-        self._is_tensor = True
-
         for key, value in self.__dict__.items():
             if value is None:
                 continue
@@ -181,24 +180,6 @@ class TokenizedDocumentInstance(BaseDataInstance):
                     f"{key} must have compatible shape with token_ids {self.token_ids.shape}."
                 )
 
-        prediction_indices_mask = torch.zeros_like(self.token_ids, dtype=torch.bool)
-        for idx, word_ids_per_sample in enumerate(self.word_ids):
-            if self.token_labels is not None:
-                prediction_indices = [
-                    i
-                    for i in range(len(word_ids_per_sample))
-                    if word_ids_per_sample[i] != word_ids_per_sample[i - 1]
-                    and self.token_labels[idx][i] != -100
-                ]
-            else:
-                prediction_indices = [
-                    i
-                    for i in range(len(word_ids_per_sample))
-                    if word_ids_per_sample[i] != word_ids_per_sample[i - 1]
-                ]
-            prediction_indices_mask[idx][prediction_indices] = True
-        self.prediction_indices_mask = prediction_indices_mask
-
         return self
 
     def select_all_overflow_samples(self) -> tuple[bool, list[int], list[str]]:
@@ -224,27 +205,62 @@ class TokenizedDocumentInstance(BaseDataInstance):
                 - A list of indices indicating the number of times each sample was repeated.
                 - A list of keys that were not repeated.
         """
-        assert self._is_tensor, (
-            "This function only supports tensorized document instances. Call to_tensor() first."
-        )
         assert self._is_batched, (
             "This function only supports batched document instances. Call batched() first."
         )
         repeat_indices = [sample.shape[0] for sample in self.token_ids]
-        for key in NON_REPEATED_KEYS:
-            assert isinstance(_rgetattr(self, key), list | NoneType), (
-                f"{key} must be a list."
-            )
-            _apply(self, key, lambda list_of_samples: torch.cat(list_of_samples, dim=0))
+
+        # we concatenate all lists of overflowed samples into a single tensor
+        def _cat_tensor_fields(
+            samples_list: list[torch.Tensor],
+        ) -> torch.Tensor | None:
+            if samples_list is not None:
+                return torch.cat(samples_list, dim=0)
+            return None
+
+        self.token_ids = _cat_tensor_fields(self.token_ids)
+        self.token_bboxes = _cat_tensor_fields(self.token_bboxes)
+        self.token_labels = _cat_tensor_fields(self.token_labels)
+        self.attention_mask = _cat_tensor_fields(self.attention_mask)
+        self.word_ids = _cat_tensor_fields(self.word_ids)
+        self.sequence_ids = _cat_tensor_fields(self.sequence_ids)
+        self.overflow_to_sample_mapping = _cat_tensor_fields(
+            self.overflow_to_sample_mapping
+        )
+        if self.qa_pair is not None:
+            self.qa_pair.answer_starts = _cat_tensor_fields(self.qa_pair.answer_starts)
+            self.qa_pair.answer_ends = _cat_tensor_fields(self.qa_pair.answer_ends)
+
+        # we recursively repeat all the remaining fields that are not in 'non_repeated_keys'
         # we recursively repeat all the batched samples with given indices
-        self.repeat_with_indices(
+        self.repeat(
             repeat_indices,
-            NON_REPEATED_KEYS + ["tokenized_answer_starts", "tokenized_answer_ends"],
+            [
+                "token_ids",
+                "token_bboxes",
+                "token_labels",
+                "attention_mask",
+                "word_ids",
+                "sequence_ids",
+                "overflow_to_sample_mapping",
+                "answer_starts",
+                "answer_ends",
+            ],
         )
         return (
             True,
             repeat_indices,
-            NON_REPEATED_KEYS + ["tokenized_answer_starts", "tokenized_answer_ends"],
+            [
+                "token_ids",
+                "token_bboxes",
+                "token_labels",
+                "attention_mask",
+                "word_ids",
+                "sequence_ids",
+                "overflow_to_sample_mapping",
+                "answer_starts",
+                "answer_ends",
+            ],
         )
 
     def select_random_overflow_samples(self):
@@ -252,9 +268,6 @@ class TokenizedDocumentInstance(BaseDataInstance):
         Unlike concat_all_overflow_samples, this function randomly selects one sample
         from each overflowed sample and concatenates them into a single tensor.
         """
-        assert self._is_tensor, (
-            "This function only supports tensorized document instances. Call to_tensor() first."
-        )
         assert self._is_batched, (
             "This function only supports batched document instances. Call batched() first."
         )
@@ -282,26 +295,50 @@ class TokenizedDocumentInstance(BaseDataInstance):
 
     def select_first_overflow_samples(self):
         """
-        Unlike concat_all_overflow_samples, this function randomly selects one sample
+        Unlike concat_all_overflow_samples, this function selects the first sample
         from each overflowed sample and concatenates them into a single tensor.
         """
-        assert self._is_tensor, (
-            "This function only supports tensorized document instances. Call to_tensor() first."
-        )
         assert self._is_batched, (
             "This function only supports batched document instances. Call batched() first."
         )
-        for key in NON_REPEATED_KEYS:
-            assert isinstance(_rgetattr(self, key), list | NoneType), (
-                f"{key} must be a list."
+
+        def _gather_first_from_sequence_list(
+            samples_list: list[torch.Tensor],
+        ) -> torch.Tensor | None:
+            if samples_list is not None:
+                return torch.stack([sample[0] for sample in samples_list])
+            return None
+
+        self.token_ids = _gather_first_from_sequence_list(self.token_ids)
+        self.token_bboxes = _gather_first_from_sequence_list(self.token_bboxes)
+        self.token_labels = _gather_first_from_sequence_list(self.token_labels)
+        self.attention_mask = _gather_first_from_sequence_list(self.attention_mask)
+        self.word_ids = _gather_first_from_sequence_list(self.word_ids)
+        self.sequence_ids = _gather_first_from_sequence_list(self.sequence_ids)
+        self.overflow_to_sample_mapping = _gather_first_from_sequence_list(
+            self.overflow_to_sample_mapping
+        )
+        if self.qa_pair is not None:
+            self.qa_pair.answer_starts = _gather_first_from_sequence_list(
+                self.qa_pair.answer_starts
             )
-            _apply(
-                self,
-                key,
-                lambda list_of_samples: torch.stack(
-                    [sample[0] for sample in list_of_samples]
-                ),
+            self.qa_pair.answer_ends = _gather_first_from_sequence_list(
+                self.qa_pair.answer_ends
             )
+
+        self._assert_all_batch_size_equal()
+
+    def _assert_all_batch_size_equal(self):
+        """
+        Asserts that all fields in the instance have the same batch size.
+        This is important for ensuring consistency in batched operations.
+        """
+        batch_size = self.token_ids.shape[0]
+        for key, value in self.__dict__.items():
+            if isinstance(value, torch.Tensor):
+                assert value.shape[0] == batch_size, (
+                    f"Field {key} has batch size {value.shape[0]}, expected {batch_size}."
+                )
 
     def decode_tokens(self, token_ids: torch.Tensor):
         assert self._tokenizer is not None, (

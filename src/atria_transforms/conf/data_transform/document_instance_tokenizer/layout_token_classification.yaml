@@ -1,7 +1,7 @@
 _target_: atria_transforms.core.sequence.DocumentInstanceTokenizer
 _partial_: false
 tokenizer_name: ???
-task_type: token_classification
+task_type: layout_token_classification
 init_kwargs: {}
 call_kwargs: {}
 overflow_sampling: return_all

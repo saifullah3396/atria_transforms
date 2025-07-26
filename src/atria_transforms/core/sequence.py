@@ -6,9 +6,8 @@ from atria_core.logger.logger import get_logger
 from atria_core.transforms import DataTransform
 from atria_core.types import TaskType
 from atria_registry import RegistryConfig
-from pydantic import Field
-
 from atria_transforms.registry import DATA_TRANSFORM
+from pydantic import Field
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -16,7 +15,6 @@ if TYPE_CHECKING:
 
     import torch
     from atria_core.types import DocumentInstance, QuestionAnswerPair, TaskType
-
     from atria_transforms.data_types import TokenizedDocumentInstance
 
 logger = get_logger(__name__)
@@ -84,8 +82,12 @@ class TokenizerObjectSanitizer(DataTransform):
             task_type=TaskType.sequence_classification.value,
         ),
         RegistryConfig(
-            name=TaskType.semantic_entity_recognition.value,
-            task_type=TaskType.semantic_entity_recognition.value,
+            name=TaskType.token_classification.value,
+            task_type=TaskType.token_classification.value,
+        ),
+        RegistryConfig(
+            name=TaskType.layout_token_classification.value,
+            task_type=TaskType.layout_token_classification.value,
         ),
         RegistryConfig(
             name=TaskType.question_answering.value,
@@ -114,13 +116,11 @@ class DocumentInstanceTokenizer(DataTransform):
     image_mean: list[float] | None = None
     image_std: list[float] | None = None
 
-    def _lazy_post_init(self) -> None:
+    def model_post_init(self, context) -> None:
         # lazy initialization of the processor to avoid significant transformers loading times
-        import inspect
         import os
 
         from atria_core.constants import _DEFAULT_ATRIA_MODELS_CACHE_DIR
-        from transformers import AutoProcessor
         from transformers.utils.constants import (
             IMAGENET_DEFAULT_MEAN,
             IMAGENET_DEFAULT_STD,
@@ -173,6 +173,11 @@ class DocumentInstanceTokenizer(DataTransform):
         self.init_kwargs = {**default_init_kwargs, **self.init_kwargs}
         self.call_kwargs = {**default_call_kwargs, **self.call_kwargs}
 
+    def _lazy_post_init(self) -> None:
+        import inspect
+
+        from transformers import AutoProcessor
+
         self._processor = AutoProcessor.from_pretrained(
             self.tokenizer_name, **self.init_kwargs
         )
@@ -190,7 +195,7 @@ class DocumentInstanceTokenizer(DataTransform):
         from atria_core.types import TaskType
 
         ground_truth = document_instance.gt
-        document_instance.image.convert_to_rgb().to_tensor()
+        document_instance.image.load().to_rgb().to_tensor()
         if self.do_resize:
             document_instance.image.resize(
                 width=self.resize_width, height=self.resize_height
@@ -210,18 +215,17 @@ class DocumentInstanceTokenizer(DataTransform):
                     if value is not None
                 ]
             )
-            boxes = [
-                bbox.value if bbox.value is not None else []
-                for bbox in ground_truth.ocr.word_bboxes
-            ]
             return {
                 "text": ground_truth.ocr.words,
-                "boxes": boxes,
+                "boxes": ground_truth.ocr.word_bboxes.value,
                 "images": document_instance.image.content,
             }
-        elif self.task_type == TaskType.semantic_entity_recognition:
+        elif self.task_type in [
+            TaskType.token_classification,
+            TaskType.layout_token_classification,
+        ]:
             assert ground_truth.ser is not None, (
-                "Ground truth of type 'ser' is required for the task type 'semantic_entity_recognition'."
+                "Ground truth of type 'ser' is required for the task type 'token_classification'."
                 " Available ground truth types: {}"
             ).format(
                 [
@@ -230,20 +234,12 @@ class DocumentInstanceTokenizer(DataTransform):
                     if value is not None
                 ]
             )
-            if self.use_ssl and ground_truth.ser.segment_level_bboxes is not None:
-                boxes = [
-                    bbox.value if bbox.value is not None else []
-                    for bbox in ground_truth.ser.segment_level_bboxes
-                ]
-            else:
-                boxes = [
-                    bbox.value if bbox.value is not None else []
-                    for bbox in ground_truth.ser.word_bboxes
-                ]
             return {
                 "text": ground_truth.ser.words,
-                "boxes": boxes,
-                "word_labels": [label.value for label in ground_truth.ser.word_labels],
+                "boxes": ground_truth.ser.segment_level_bboxes.value
+                if self.use_ssl and ground_truth.ser.segment_level_bboxes is not None
+                else ground_truth.ser.word_bboxes.value,
+                "word_labels": ground_truth.ser.word_labels.value,
                 "images": document_instance.image.content,
             }
         elif self.task_type == TaskType.question_answering:
@@ -272,20 +268,12 @@ class DocumentInstanceTokenizer(DataTransform):
                     if value is not None
                 ]
             )
-            if self.use_ssl and ground_truth.vqa.segment_level_bboxes is not None:
-                boxes = [
-                    bbox.value if bbox.value is not None else []
-                    for bbox in ground_truth.vqa.segment_level_bboxes
-                ]
-            else:
-                boxes = [
-                    bbox.value if bbox.value is not None else []
-                    for bbox in ground_truth.vqa.word_bboxes
-                ]
             return {
                 "text": ground_truth.vqa.qa_pair.question_text,
                 "text_pair": ground_truth.vqa.words,
-                "boxes": boxes,
+                "boxes": ground_truth.vqa.segment_level_bboxes.value
+                if self.use_ssl and ground_truth.vqa.segment_level_bboxes is not None
+                else ground_truth.vqa.word_bboxes.value,
                 "images": document_instance.image.content,
             }
         else:
@@ -294,7 +282,7 @@ class DocumentInstanceTokenizer(DataTransform):
                 "Supported task types are: {}".format(
                     [
                         TaskType.sequence_classification,
-                        TaskType.semantic_entity_recognition,
+                        TaskType.token_classification,
                         TaskType.question_answering,
                         TaskType.visual_question_answering,
                     ]
@@ -326,7 +314,6 @@ class DocumentInstanceTokenizer(DataTransform):
         sequence_length: int = 512,
     ) -> Mapping[str, Any] | list[Mapping[str, Any]]:
         import torch
-
         from atria_transforms.data_types import TokenizedQuestionAnswerPair
 
         tokenized_answer_starts, tokenized_answer_ends = [], []
@@ -372,7 +359,6 @@ class DocumentInstanceTokenizer(DataTransform):
     ) -> Mapping[str, Any] | list[Mapping[str, Any]]:
         import torch
         from atria_core.types import TaskType
-
         from atria_transforms.data_types import TokenizedDocumentInstance
 
         assert not document_instance._is_batched, (
