@@ -28,14 +28,15 @@ if TYPE_CHECKING:
 )
 class TorchvisionTransform(DataTransform):  # or inherit from DataTransform if needed
     model_config = ConfigDict(extra="allow")
-    tf: Callable | str
+    tf: str
+    _built_tf: Callable
 
     def _lazy_post_init(self) -> None:
         from atria_core.utilities.imports import _resolve_module_from_path
 
-        self.tf = _resolve_module_from_path(f"torchvision.transforms.{self.tf}")(
+        self._built_tf = _resolve_module_from_path(f"torchvision.transforms.{self.tf}")(
             **self.model_extra
         )
 
     def _apply_transforms(self, image: "torch.Tensor") -> "torch.Tensor":
-        return self.tf(image)
+        return self._built_tf(image)
