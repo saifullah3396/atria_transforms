@@ -37,6 +37,7 @@ from atria_core.transforms import DataTransform
 from atria_core.transforms.base import ComposedTransform
 from atria_core.types.data_instance.image_instance import ImageInstance
 from atria_registry.registry_config import RegistryConfig
+
 from atria_transforms.registry import DATA_TRANSFORM
 
 if TYPE_CHECKING:
@@ -69,8 +70,10 @@ class ImageInstanceTransform(DataTransform):
         """
         Initializes the transformation by setting up the resize parameters.
         """
-
-        self.transforms = ComposedTransform(transforms=list(self.transforms.values()))
+        if isinstance(self.transforms, dict):
+            self.transforms = ComposedTransform(
+                transforms=list(self.transforms.values())
+            )
         self.transforms.initialize()
 
     def _apply_transforms(self, instance: ImageInstance) -> ImageInstance:
