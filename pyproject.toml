@@ -130,8 +130,8 @@ torchvision = [
   { index = "pytorch-cpu", extra = "torch-cpu"},
   { index = "pytorch-cu121", extra = "torch-gpu" },
 ]
-atria-core = { path = "../atria_core", editable = true }
-atria-registry = { path = "../atria_registry", editable = true }
+atria-core = { path = "https://github.com/saifullah3396/atria_core" }
+atria-registry = { path = "https://github.com/saifullah3396/atria_registry" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
